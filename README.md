@@ -33,4 +33,24 @@ Supabase ou avec la CLI Supabase.
 npm run dev
 npm run lint
 npm run build
+npm run build:worker
+```
+
+## Déploiement Cloudflare Workers
+
+Le projet utilise OpenNext pour exécuter Next.js sur Cloudflare Workers.
+
+Dans Cloudflare, configurez les variables de build et d’exécution suivantes :
+
+```text
+NEXT_PUBLIC_SITE_URL
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+```
+
+Commandes utilisées par le pipeline :
+
+```text
+Build command: npm run build:worker
+Deploy command: npx wrangler deploy
 ```
