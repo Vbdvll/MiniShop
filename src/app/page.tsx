@@ -43,6 +43,12 @@ export default function Home() {
         <Logo />
         <nav className="flex items-center gap-2 sm:gap-4" aria-label="Navigation principale">
           <Link
+            href="/marche"
+            className="hidden rounded-full px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-white/70 sm:inline-flex"
+          >
+            Explorer le marché
+          </Link>
+          <Link
             href="/connexion"
             className="rounded-full px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-white/70"
           >
@@ -86,6 +92,13 @@ export default function Home() {
               Voir un exemple
             </a>
           </div>
+          <Link
+            href="/marche"
+            className="mt-4 inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700 sm:hidden"
+          >
+            Explorer Marché Central
+            <ArrowRight size={16} aria-hidden="true" />
+          </Link>
           <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm font-medium text-ink/60">
             {["Sans application", "Sans paiement en ligne", "Prêt en quelques minutes"].map(
               (item) => (

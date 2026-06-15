@@ -1,11 +1,19 @@
-import { ImageIcon, MapPin, MessageCircle, ShoppingBag } from "lucide-react";
+import {
+  ArrowRight,
+  ImageIcon,
+  MapPin,
+  MessageCircle,
+  ShoppingBag,
+} from "lucide-react";
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Logo } from "@/components/logo";
 import { ShareShopButton } from "@/components/share-shop-button";
 import { formatXofPrice } from "@/lib/product";
 import { createClient } from "@/lib/supabase/server";
+import { createWhatsAppOrderUrl } from "@/lib/whatsapp";
 
 type PageProps = {
   params: Promise<{ shopSlug: string }>;
@@ -67,14 +75,20 @@ export default async function PublicShopPage({ params }: PageProps) {
     "",
   );
   const shopUrl = `${siteUrl}/${shop.slug}`;
-  const whatsappNumber = shop.whatsapp_number.replace(/\D/g, "");
-
   return (
     <main className="min-h-screen bg-[#f8f6f0] text-ink">
       <header className="border-b border-ink/8 bg-white/90">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
           <Logo />
-          <ShareShopButton shopName={shop.name} url={shopUrl} variant="light" />
+          <div className="flex items-center gap-2">
+            <Link
+              href="/marche"
+              className="hidden min-h-11 items-center rounded-full border border-ink/10 bg-white px-4 text-sm font-extrabold text-ink shadow-sm sm:inline-flex"
+            >
+              Explorer le marché
+            </Link>
+            <ShareShopButton shopName={shop.name} url={shopUrl} variant="light" />
+          </div>
         </div>
       </header>
 
@@ -118,16 +132,12 @@ export default async function PublicShopPage({ params }: PageProps) {
                   .getPublicUrl(firstImage.storage_path).data.publicUrl
               : null;
             const productUrl = `${shopUrl}#${product.slug}`;
-            const message = [
-              "Bonjour, je souhaite commander :",
-              `Produit : ${product.name}`,
-              `Prix : ${formatXofPrice(product.price_xof)}`,
-              product.reference ? `Référence : ${product.reference}` : null,
-              `Lien : ${productUrl}`,
-            ]
-              .filter(Boolean)
-              .join("\n");
-            const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+            const whatsappUrl = createWhatsAppOrderUrl(shop.whatsapp_number, {
+              name: product.name,
+              priceXof: product.price_xof,
+              reference: product.reference,
+              url: productUrl,
+            });
             const unavailable = product.status === "out_of_stock";
 
             return (
@@ -183,8 +193,17 @@ export default async function PublicShopPage({ params }: PageProps) {
         </div>
       </section>
 
-      <footer className="border-t border-ink/8 bg-white px-4 py-6 text-center text-xs font-medium text-ink/40">
-        Catalogue créé avec MiniShop
+      <footer className="border-t border-ink/8 bg-white px-4 py-7 text-center">
+        <Link
+          href="/marche"
+          className="inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700"
+        >
+          Explorer d’autres boutiques
+          <ArrowRight size={16} aria-hidden="true" />
+        </Link>
+        <p className="mt-2 text-xs font-medium text-ink/35">
+          Catalogue créé avec MiniShop
+        </p>
       </footer>
     </main>
   );
