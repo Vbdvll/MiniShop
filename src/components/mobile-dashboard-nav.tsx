@@ -1,6 +1,6 @@
 "use client";
 
-import { Home, Package, Plus, Store } from "lucide-react";
+import { Home, Package, Plus, ShoppingBag, Store } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -22,6 +22,12 @@ const items = [
     href: "/dashboard/boutique",
     label: "Boutique",
     icon: Store,
+    position: "col-start-4",
+  },
+  {
+    href: "/marche",
+    label: "Marché",
+    icon: ShoppingBag,
     position: "col-start-5",
   },
 ];
