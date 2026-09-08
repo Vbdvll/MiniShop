@@ -1,208 +1,552 @@
 import {
   ArrowRight,
-  Check,
+  ImageIcon,
+  MapPin,
   MessageCircle,
-  PackagePlus,
-  Share2,
-  ShoppingBag,
-  Sparkles,
+  Search,
+  Store,
 } from "lucide-react";
+import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Logo } from "@/components/logo";
+import { ProductPreviewModal } from "@/components/product-preview-modal";
+import { formatXofPrice } from "@/lib/product";
+import { createClient } from "@/lib/supabase/server";
+import { createWhatsAppOrderUrl } from "@/lib/whatsapp";
 
-const benefits = [
-  {
-    icon: PackagePlus,
-    title: "Ajoutez vos produits",
-    description: "Photos, prix et description. Votre catalogue prend forme en quelques minutes.",
+export const metadata: Metadata = {
+  title: "Marché Central",
+  description:
+    "Découvrez les boutiques et produits de vendeurs sénégalais, puis commandez directement sur WhatsApp.",
+  openGraph: {
+    title: "Marché Central",
+    description:
+      "Découvrez des boutiques sénégalaises et commandez directement sur WhatsApp.",
+    locale: "fr_SN",
+    type: "website",
   },
-  {
-    icon: Share2,
-    title: "Partagez un seul lien",
-    description: "Publiez-le sur WhatsApp, Instagram, Facebook ou TikTok.",
-  },
-  {
-    icon: MessageCircle,
-    title: "Recevez les demandes",
-    description: "Vos clients choisissent un produit et vous écrivent directement sur WhatsApp.",
-  },
-];
+};
 
-const products = [
-  { name: "Huile de baobab", price: "5 000 F", tone: "bg-[#f2c98a]" },
-  { name: "Savon karité", price: "3 500 F", tone: "bg-[#d9a56b]" },
-  { name: "Lait corporel", price: "7 500 F", tone: "bg-[#ecd8bd]" },
-  { name: "Brume parfumée", price: "4 500 F", tone: "bg-[#c9826e]" },
-];
+type PageProps = {
+  searchParams: Promise<{
+    q?: string;
+  }>;
+};
 
-export default function Home() {
+export default async function MarketPage({
+  searchParams,
+}: PageProps) {
+  const {
+    q = "",
+  } = await searchParams;
+
+  const search = q
+    .trim()
+    .slice(0, 80);
+
+  const filterSearch = search
+    .replace(
+      /[^\p{L}\p{N}\s-]/gu,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const supabase =
+    await createClient();
+
+  let shopsQuery =
+    supabase
+      .from("shops")
+      .select(
+        "id, name, slug, description, address",
+      )
+      .eq(
+        "status",
+        "published",
+      )
+      .order(
+        "updated_at",
+        {
+          ascending: false,
+        },
+      )
+      .limit(12);
+
+  if (filterSearch) {
+    shopsQuery =
+      shopsQuery.or(
+        `name.ilike.%${filterSearch}%,description.ilike.%${filterSearch}%,address.ilike.%${filterSearch}%`,
+      );
+  }
+
+  let productsQuery =
+    supabase
+      .from("products")
+      .select(
+        "id, name, slug, description, price_xof, reference, status, product_images(storage_path, position), shops!inner(name, slug, whatsapp_number, address, status)",
+      )
+      .eq(
+        "shops.status",
+        "published",
+      )
+      .in(
+        "status",
+        [
+          "active",
+          "out_of_stock",
+        ],
+      )
+      .order(
+        "created_at",
+        {
+          ascending: false,
+        },
+      )
+      .order(
+        "position",
+        {
+          referencedTable:
+            "product_images",
+        },
+      )
+      .limit(24);
+
+  if (filterSearch) {
+    productsQuery =
+      productsQuery.or(
+        `name.ilike.%${filterSearch}%,description.ilike.%${filterSearch}%,reference.ilike.%${filterSearch}%`,
+      );
+  }
+
+  const [
+    {
+      data: shops,
+    },
+    {
+      data: products,
+    },
+  ] =
+    await Promise.all([
+      shopsQuery,
+      productsQuery,
+    ]);
+
+  const siteUrl =
+    (
+      process.env
+        .NEXT_PUBLIC_SITE_URL ??
+      "http://localhost:3000"
+    ).replace(/\/$/, "");
+
+  const resultCount =
+    (shops?.length ?? 0) +
+    (products?.length ?? 0);
+
   return (
-    <main className="min-h-screen overflow-hidden bg-cream text-ink">
-      <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8 lg:px-12">
-        <Logo />
-        <nav className="flex items-center gap-2 sm:gap-4" aria-label="Navigation principale">
-          <Link
-            href="/marche"
-            className="hidden rounded-full px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-white/70 sm:inline-flex"
-          >
-            Explorer le marché
-          </Link>
-          <Link
-            href="/connexion"
-            className="rounded-full px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-white/70"
-          >
-            Se connecter
-          </Link>
+    <main className="min-h-screen bg-[#f8f6f0] text-ink">
+      <header className="border-b border-ink/8 bg-white/95">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-10">
+          <Logo />
+
           <Link
             href="/inscription"
-            className="rounded-full bg-ink px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800"
+            className="rounded-full bg-ink px-4 py-2.5 text-sm font-extrabold text-white"
           >
-            Créer ma boutique
+            Vendre ici
           </Link>
-        </nav>
+        </div>
       </header>
 
-      <section className="relative mx-auto grid w-full max-w-7xl gap-12 px-5 pb-20 pt-10 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-12 lg:pb-28 lg:pt-16">
-        <div className="relative z-10 max-w-2xl">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-900/10 bg-white/70 px-3 py-1.5 text-sm font-semibold text-emerald-900 shadow-sm">
-            <Sparkles size={15} aria-hidden="true" />
-            Pensé pour les vendeurs sur WhatsApp
-          </div>
-          <h1 className="text-balance text-5xl font-bold leading-[1.02] tracking-[-0.045em] sm:text-6xl lg:text-7xl">
-            Tous vos produits.
-            <span className="block text-emerald-700">Un seul lien.</span>
-          </h1>
-          <p className="mt-6 max-w-xl text-lg leading-8 text-ink/70 sm:text-xl">
-            Créez votre catalogue en ligne, partagez-le partout et laissez vos clients
-            commander directement sur WhatsApp.
+      <section className="border-b border-ink/8 bg-emerald-950 text-white">
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14 lg:px-10">
+          <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-emerald-300">
+            Marché Central
           </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link
-              href="/inscription"
-              className="inline-flex min-h-13 items-center justify-center gap-2 rounded-full bg-emerald-700 px-6 py-3.5 font-bold text-white shadow-lg shadow-emerald-900/15 transition hover:-translate-y-0.5 hover:bg-emerald-800"
-            >
-              Créer ma boutique gratuitement
-              <ArrowRight size={18} aria-hidden="true" />
-            </Link>
-            <a
-              href="#exemple"
-              className="inline-flex min-h-13 items-center justify-center rounded-full border border-ink/15 bg-white/70 px-6 py-3.5 font-bold transition hover:bg-white"
-            >
-              Voir un exemple
-            </a>
-          </div>
-          <Link
-            href="/marche"
-            className="mt-4 inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700 sm:hidden"
-          >
-            Explorer Marché Central
-            <ArrowRight size={16} aria-hidden="true" />
-          </Link>
-          <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm font-medium text-ink/60">
-            {["Sans application", "Sans paiement en ligne", "Prêt en quelques minutes"].map(
-              (item) => (
-                <span key={item} className="inline-flex items-center gap-1.5">
-                  <Check size={15} className="text-emerald-700" aria-hidden="true" />
-                  {item}
-                </span>
-              ),
-            )}
-          </div>
-        </div>
 
-        <div id="exemple" className="relative mx-auto w-full max-w-lg lg:max-w-none">
-          <div className="absolute -left-16 top-16 h-64 w-64 rounded-full bg-sun/35 blur-3xl" />
-          <div className="absolute -right-12 bottom-10 h-64 w-64 rounded-full bg-emerald-400/20 blur-3xl" />
-          <div className="phone-shell relative mx-auto w-[min(100%,360px)] rotate-[1.5deg] rounded-[2.6rem] border-[7px] border-ink bg-white p-2 shadow-2xl shadow-ink/20">
-            <div className="overflow-hidden rounded-[2rem] bg-[#fffdf8]">
-              <div className="mx-auto mt-2 h-5 w-24 rounded-full bg-ink" />
-              <div className="px-4 pb-5 pt-5">
-                <div className="flex items-center gap-3">
-                  <div className="grid size-12 place-items-center rounded-full bg-emerald-700 text-white">
-                    <ShoppingBag size={22} aria-hidden="true" />
-                  </div>
-                  <div>
-                    <p className="font-bold">Fatou Cosmétiques</p>
-                    <p className="text-xs text-ink/55">Beauté naturelle • Dakar</p>
-                  </div>
-                </div>
-                <p className="mt-4 text-sm leading-5 text-ink/65">
-                  Des soins naturels sélectionnés avec amour pour votre peau.
+          <h1 className="mt-3 max-w-3xl text-4xl font-bold leading-tight tracking-[-0.035em] sm:text-5xl">
+            Plusieurs boutiques, une
+            seule promenade.
+          </h1>
+
+          <p className="mt-4 max-w-2xl leading-7 text-white/65">
+            Découvrez les produits de
+            vendeurs sénégalais et
+            contactez-les directement
+            sur WhatsApp.
+          </p>
+
+          <form
+            action="/marche"
+            method="get"
+            className="relative mt-7 max-w-2xl"
+          >
+            <Search
+              size={20}
+              className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/35"
+              aria-hidden="true"
+            />
+
+            <input
+              type="search"
+              name="q"
+              defaultValue={search}
+              placeholder="Rechercher un produit ou une boutique"
+              className="min-h-14 w-full rounded-2xl bg-white py-3 pl-12 pr-28 font-medium text-ink outline-none placeholder:text-ink/35 focus:ring-4 focus:ring-emerald-400/25"
+            />
+
+            <button
+              type="submit"
+              className="absolute right-2 top-2 min-h-10 rounded-xl bg-emerald-700 px-4 text-sm font-extrabold text-white"
+            >
+              Rechercher
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-10">
+        {search && (
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-ink/55">
+              {resultCount} résultat
+              {resultCount === 1
+                ? ""
+                : "s"} pour{" "}
+              <strong className="text-ink">
+                « {search} »
+              </strong>
+            </p>
+
+            <Link
+              href="/marche"
+              className="text-sm font-extrabold text-emerald-700"
+            >
+              Effacer la recherche
+            </Link>
+          </div>
+        )}
+
+        {(shops?.length ?? 0) >
+          0 && (
+          <section>
+            <div className="flex items-end justify-between">
+              <div>
+                <p className="text-sm font-extrabold uppercase tracking-[0.14em] text-emerald-700">
+                  Boutiques
                 </p>
-                <div className="mt-5 grid grid-cols-2 gap-3">
-                  {products.map((product, index) => (
-                    <article
-                      key={product.name}
-                      className="overflow-hidden rounded-2xl border border-ink/8 bg-white shadow-sm"
-                    >
-                      <div className={`relative aspect-square ${product.tone}`}>
-                        <div className="absolute inset-x-5 bottom-0 top-8 rounded-t-[45%] bg-white/65 shadow-inner" />
-                        <div className="absolute inset-x-8 bottom-4 top-14 rounded-t-[45%] border border-white/70 bg-white/25" />
-                        {index === 3 && (
-                          <div className="absolute left-1/2 top-5 h-8 w-5 -translate-x-1/2 rounded-sm bg-ink/70" />
-                        )}
-                      </div>
-                      <div className="p-2.5">
-                        <h2 className="truncate text-xs font-semibold">{product.name}</h2>
-                        <p className="mt-1 text-sm font-extrabold text-emerald-800">
-                          {product.price}
-                        </p>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#25d366] px-3 py-3 text-sm font-extrabold text-white"
-                >
-                  <MessageCircle size={17} aria-hidden="true" />
-                  Commander sur WhatsApp
-                </button>
+
+                <h2 className="mt-1 text-2xl font-bold">
+                  À découvrir
+                </h2>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
 
-      <section className="border-y border-ink/8 bg-white/75">
-        <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-12">
-          <div className="mx-auto max-w-2xl text-center">
-            <p className="text-sm font-extrabold uppercase tracking-[0.16em] text-emerald-700">
-              Simple par conception
-            </p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
-              Du premier produit à la première demande
+            <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {(shops ?? []).map(
+                (shop) => (
+                  <Link
+                    key={shop.id}
+                    href={`/${shop.slug}`}
+                    className="group rounded-3xl border border-ink/8 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  >
+                    <div className="flex items-start gap-4">
+                      <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+                        <Store
+                          size={22}
+                          aria-hidden="true"
+                        />
+                      </span>
+
+                      <span className="min-w-0">
+                        <span className="block truncate text-lg font-bold">
+                          {shop.name}
+                        </span>
+
+                        {shop.address && (
+                          <span className="mt-1 flex items-center gap-1 text-xs font-medium text-ink/45">
+                            <MapPin
+                              size={13}
+                              aria-hidden="true"
+                            />
+                            {shop.address}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    {shop.description && (
+                      <p className="mt-4 line-clamp-2 text-sm leading-6 text-ink/50">
+                        {
+                          shop.description
+                        }
+                      </p>
+                    )}
+
+                    <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-extrabold text-emerald-700">
+                      Visiter la boutique
+
+                      <ArrowRight
+                        size={15}
+                        className="transition group-hover:translate-x-0.5"
+                        aria-hidden="true"
+                      />
+                    </span>
+                  </Link>
+                ),
+              )}
+            </div>
+          </section>
+        )}
+
+        {(products?.length ?? 0) >
+          0 && (
+          <section
+            className={
+              (shops?.length ?? 0) >
+              0
+                ? "mt-12"
+                : ""
+            }
+          >
+            <div>
+              <p className="text-sm font-extrabold uppercase tracking-[0.14em] text-emerald-700">
+                Produits
+              </p>
+
+              <h2 className="mt-1 text-2xl font-bold">
+                {search
+                  ? "Résultats produits"
+                  : "Ajoutés récemment"}
+              </h2>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
+              {(products ?? []).map(
+                (product) => {
+                  const shop =
+                    Array.isArray(
+                      product.shops,
+                    )
+                      ? product.shops[0]
+                      : product.shops;
+
+                  if (!shop) {
+                    return null;
+                  }
+
+                  const productImages =
+                    (
+                      product.product_images ??
+                      []
+                    )
+                      .filter(
+                        (
+                          image,
+                        ) =>
+                          Boolean(
+                            image?.storage_path,
+                          ),
+                      )
+                      .sort(
+                        (
+                          a,
+                          b,
+                        ) =>
+                          (a.position ??
+                            0) -
+                          (b.position ??
+                            0),
+                      );
+
+                  const images =
+                    productImages.map(
+                      (
+                        image,
+                      ) => ({
+                        url: supabase.storage
+                          .from(
+                            "product-images",
+                          )
+                          .getPublicUrl(
+                            image.storage_path,
+                          ).data
+                          .publicUrl,
+                        position:
+                          image.position ??
+                          0,
+                      }),
+                    );
+
+                  const firstImage =
+                    images[0];
+
+                  const productUrl =
+                    `${siteUrl}/${shop.slug}#${product.slug}`;
+
+                  const unavailable =
+                    product.status ===
+                    "out_of_stock";
+
+                  const whatsappUrl =
+                    createWhatsAppOrderUrl(
+                      shop.whatsapp_number,
+                      {
+                        name:
+                          product.name,
+                        priceXof:
+                          product.price_xof,
+                        reference:
+                          product.reference,
+                        url: productUrl,
+                      },
+                    );
+
+                  return (
+                    <article
+                      key={product.id}
+                      className="flex flex-col overflow-hidden rounded-2xl border border-ink/8 bg-white shadow-sm sm:rounded-3xl"
+                    >
+                      <ProductPreviewModal
+                        product={{
+                          name:
+                            product.name,
+                          description:
+                            product.description,
+                          priceLabel:
+                            formatXofPrice(
+                              product.price_xof,
+                            ),
+                          reference:
+                            product.reference,
+                          shopName:
+                            shop.name,
+                          status:
+                            unavailable
+                              ? "out_of_stock"
+                              : "active",
+                          images,
+                          whatsappUrl,
+                        }}
+                      >
+                        <div className="aspect-square bg-cream">
+                          {firstImage ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={
+                                firstImage.url
+                              }
+                              alt={
+                                product.name
+                              }
+                              loading="lazy"
+                              className="h-full w-full object-cover transition duration-300 hover:scale-[1.02]"
+                            />
+                          ) : (
+                            <div className="grid h-full place-items-center text-ink/20">
+                              <ImageIcon
+                                size={36}
+                                aria-hidden="true"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </ProductPreviewModal>
+
+                      <div className="flex flex-1 flex-col p-3 sm:p-5">
+                        <Link
+                          href={`/${shop.slug}`}
+                          className="truncate text-[11px] font-extrabold uppercase tracking-wide text-emerald-700"
+                        >
+                          {shop.name}
+                        </Link>
+
+                        <ProductPreviewModal
+                          product={{
+                            name:
+                              product.name,
+                            description:
+                              product.description,
+                            priceLabel:
+                              formatXofPrice(
+                                product.price_xof,
+                              ),
+                            reference:
+                              product.reference,
+                            shopName:
+                              shop.name,
+                            status:
+                              unavailable
+                                ? "out_of_stock"
+                                : "active",
+                            images,
+                            whatsappUrl,
+                          }}
+                        >
+                          <h3 className="mt-1 cursor-pointer font-bold leading-5 hover:text-emerald-700 sm:text-lg">
+                            {
+                              product.name
+                            }
+                          </h3>
+                        </ProductPreviewModal>
+
+                        <p className="mt-1 text-sm font-extrabold text-ink sm:text-base">
+                          {formatXofPrice(
+                            product.price_xof,
+                          )}
+                        </p>
+
+                        {unavailable ? (
+                          <span className="mt-auto pt-4 text-center text-xs font-extrabold text-red-700">
+                            Rupture de stock
+                          </span>
+                        ) : (
+                          <a
+                            href={
+                              whatsappUrl
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-4 flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-2 py-2.5 text-xs font-extrabold text-white transition hover:bg-[#1fbd5b] sm:text-sm"
+                          >
+                            <MessageCircle
+                              size={16}
+                              aria-hidden="true"
+                            />
+                            Commander
+                          </a>
+                        )}
+                      </div>
+                    </article>
+                  );
+                },
+              )}
+            </div>
+          </section>
+        )}
+
+        {resultCount ===
+          0 && (
+          <div className="rounded-3xl border border-dashed border-ink/15 bg-white px-6 py-14 text-center">
+            <Search
+              size={30}
+              className="mx-auto text-ink/25"
+              aria-hidden="true"
+            />
+
+            <h2 className="mt-4 text-xl font-bold">
+              Aucun résultat trouvé
             </h2>
-          </div>
-          <div className="mt-12 grid gap-5 md:grid-cols-3">
-            {benefits.map((benefit, index) => (
-              <article
-                key={benefit.title}
-                className="rounded-3xl border border-ink/8 bg-white p-6 shadow-sm"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="grid size-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
-                    <benefit.icon size={23} aria-hidden="true" />
-                  </div>
-                  <span className="text-4xl font-black text-ink/7">0{index + 1}</span>
-                </div>
-                <h3 className="mt-6 text-xl font-bold">{benefit.title}</h3>
-                <p className="mt-2 leading-7 text-ink/60">{benefit.description}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      <footer className="bg-ink text-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-10 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-12">
-          <Logo inverted />
-          <p className="text-sm text-white/55">
-            Le catalogue simple des vendeurs WhatsApp au Sénégal.
-          </p>
-        </div>
-      </footer>
+            <p className="mt-2 text-sm text-ink/50">
+              Essayez un autre produit,
+              une ville ou un nom de
+              boutique.
+            </p>
+          </div>
+        )}
+      </div>
     </main>
   );
 }
