@@ -113,14 +113,9 @@ export default async function MarketPage({ searchParams }: PageProps) {
       productData = (data ?? []) as ProductRow[];
     }
   } else {
-    const productQueries: Promise<{
-      data: ProductRow[] | null;
-      error: unknown;
-    }>[] = [];
-
-    /* Produits correspondant au texte recherché. */
-    productQueries.push(
-      supabase
+    /* Produits correspondant directement au texte recherché. */
+    const { data: directProducts, error: directProductsError } =
+      await supabase
         .from("products")
         .select(
           "id, shop_id, name, slug, description, price_xof, reference, status, product_images(storage_path, position)",
@@ -131,17 +126,26 @@ export default async function MarketPage({ searchParams }: PageProps) {
         )
         .order("created_at", { ascending: false })
         .order("position", { referencedTable: "product_images" })
-        .limit(24)
-        .then(({ data, error }) => ({
-          data: (data ?? []) as ProductRow[],
-          error,
-        })),
-    );
+        .limit(24);
 
-    /* Si la recherche correspond à une boutique, ses produits restent visibles. */
+    if (directProductsError) {
+      console.error(
+        "[market] direct product search failed",
+        directProductsError,
+      );
+    } else {
+      productData.push(...((directProducts ?? []) as ProductRow[]));
+    }
+
+    /*
+     * Si la recherche correspond à une boutique, ses produits restent visibles.
+     * On fait cette requête séparément plutôt que de mettre les Supabase
+     * query builders dans Promise.all(), car ils sont Thenable mais pas des
+     * Promise natives et TypeScript le signale avec les versions récentes.
+     */
     if (matchingShopIds.length > 0) {
-      productQueries.push(
-        supabase
+      const { data: shopProducts, error: shopProductsError } =
+        await supabase
           .from("products")
           .select(
             "id, shop_id, name, slug, description, price_xof, reference, status, product_images(storage_path, position)",
@@ -150,31 +154,29 @@ export default async function MarketPage({ searchParams }: PageProps) {
           .in("shop_id", matchingShopIds)
           .order("created_at", { ascending: false })
           .order("position", { referencedTable: "product_images" })
-          .limit(24)
-          .then(({ data, error }) => ({
-            data: (data ?? []) as ProductRow[],
-            error,
-          })),
-      );
+          .limit(24);
+
+      if (shopProductsError) {
+        console.error(
+          "[market] shop product search failed",
+          shopProductsError,
+        );
+      } else {
+        productData.push(...((shopProducts ?? []) as ProductRow[]));
+      }
     }
 
-    const results = await Promise.all(productQueries);
-
+    /* Supprime les doublons lorsque les deux recherches renvoient le même produit. */
     const ids = new Set<string>();
 
-    for (const result of results) {
-      if (result.error) {
-        console.error("[market] search products query failed", result.error);
-        continue;
+    productData = productData.filter((product) => {
+      if (ids.has(product.id)) {
+        return false;
       }
 
-      for (const product of result.data) {
-        if (!ids.has(product.id)) {
-          ids.add(product.id);
-          productData.push(product);
-        }
-      }
-    }
+      ids.add(product.id);
+      return true;
+    });
 
     productData = productData.slice(0, 24);
   }
