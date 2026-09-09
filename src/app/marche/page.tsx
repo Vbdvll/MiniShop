@@ -32,6 +32,30 @@ type PageProps = {
   searchParams: Promise<{ q?: string }>;
 };
 
+type ProductRow = {
+  id: string;
+  shop_id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  price_xof: number;
+  reference: string | null;
+  status: "active" | "out_of_stock";
+  product_images: Array<{
+    storage_path: string;
+    position: number;
+  }>;
+};
+
+type ShopRow = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  whatsapp_number: string;
+  address: string | null;
+};
+
 export default async function MarketPage({ searchParams }: PageProps) {
   const { q = "" } = await searchParams;
   const search = q.trim().slice(0, 80);
@@ -39,45 +63,160 @@ export default async function MarketPage({ searchParams }: PageProps) {
     .replace(/[^\p{L}\p{N}\s-]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+
   const supabase = await createClient();
 
+  /*
+   * IMPORTANT:
+   * We deliberately avoid a shops!inner(...) nested relation here.
+   * The public /marche page must remain robust even if the generated
+   * Supabase relationship metadata changes.
+   */
   let shopsQuery = supabase
     .from("shops")
-    .select("id, name, slug, description, address")
+    .select("id, name, slug, description, whatsapp_number, address")
     .eq("status", "published")
     .order("updated_at", { ascending: false })
     .limit(12);
+
   if (filterSearch) {
     shopsQuery = shopsQuery.or(
       `name.ilike.%${filterSearch}%,description.ilike.%${filterSearch}%,address.ilike.%${filterSearch}%`,
     );
   }
 
-  let productsQuery = supabase
-    .from("products")
-    .select(
-      "id, name, slug, description, price_xof, reference, status, product_images(storage_path, position), shops!inner(name, slug, whatsapp_number, address, status)",
-    )
-    .eq("shops.status", "published")
-    .in("status", ["active", "out_of_stock"])
-    .order("created_at", { ascending: false })
-    .order("position", { referencedTable: "product_images" })
-    .limit(24);
-  if (filterSearch) {
-    productsQuery = productsQuery.or(
-      `name.ilike.%${filterSearch}%,description.ilike.%${filterSearch}%,reference.ilike.%${filterSearch}%`,
-    );
+  const { data: shopData, error: shopsError } = await shopsQuery;
+
+  if (shopsError) {
+    console.error("[market] shops query failed", shopsError);
   }
 
-  const [{ data: shops }, { data: products }] = await Promise.all([
-    shopsQuery,
-    productsQuery,
-  ]);
-  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(
-    /\/$/,
-    "",
+  const visibleShops = (shopData ?? []) as ShopRow[];
+  const matchingShopIds = visibleShops.map((shop) => shop.id);
+
+  let productData: ProductRow[] = [];
+
+  if (!filterSearch) {
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        "id, shop_id, name, slug, description, price_xof, reference, status, product_images(storage_path, position)",
+      )
+      .in("status", ["active", "out_of_stock"])
+      .order("created_at", { ascending: false })
+      .order("position", { referencedTable: "product_images" })
+      .limit(24);
+
+    if (error) {
+      console.error("[market] products query failed", error);
+    } else {
+      productData = (data ?? []) as ProductRow[];
+    }
+  } else {
+    const productQueries: Promise<{
+      data: ProductRow[] | null;
+      error: unknown;
+    }>[] = [];
+
+    /* Produits correspondant au texte recherché. */
+    productQueries.push(
+      supabase
+        .from("products")
+        .select(
+          "id, shop_id, name, slug, description, price_xof, reference, status, product_images(storage_path, position)",
+        )
+        .in("status", ["active", "out_of_stock"])
+        .or(
+          `name.ilike.%${filterSearch}%,description.ilike.%${filterSearch}%,reference.ilike.%${filterSearch}%`,
+        )
+        .order("created_at", { ascending: false })
+        .order("position", { referencedTable: "product_images" })
+        .limit(24)
+        .then(({ data, error }) => ({
+          data: (data ?? []) as ProductRow[],
+          error,
+        })),
+    );
+
+    /* Si la recherche correspond à une boutique, ses produits restent visibles. */
+    if (matchingShopIds.length > 0) {
+      productQueries.push(
+        supabase
+          .from("products")
+          .select(
+            "id, shop_id, name, slug, description, price_xof, reference, status, product_images(storage_path, position)",
+          )
+          .in("status", ["active", "out_of_stock"])
+          .in("shop_id", matchingShopIds)
+          .order("created_at", { ascending: false })
+          .order("position", { referencedTable: "product_images" })
+          .limit(24)
+          .then(({ data, error }) => ({
+            data: (data ?? []) as ProductRow[],
+            error,
+          })),
+      );
+    }
+
+    const results = await Promise.all(productQueries);
+
+    const ids = new Set<string>();
+
+    for (const result of results) {
+      if (result.error) {
+        console.error("[market] search products query failed", result.error);
+        continue;
+      }
+
+      for (const product of result.data) {
+        if (!ids.has(product.id)) {
+          ids.add(product.id);
+          productData.push(product);
+        }
+      }
+    }
+
+    productData = productData.slice(0, 24);
+  }
+
+  /*
+   * Les produits doivent appartenir à une boutique publiée.
+   * On récupère leurs boutiques en une seconde requête robuste.
+   */
+  const productShopIds = Array.from(
+    new Set(productData.map((product) => product.shop_id)),
   );
-  const resultCount = (shops?.length ?? 0) + (products?.length ?? 0);
+
+  let productShops: ShopRow[] = [];
+
+  if (productShopIds.length > 0) {
+    const { data, error } = await supabase
+      .from("shops")
+      .select("id, name, slug, description, whatsapp_number, address")
+      .eq("status", "published")
+      .in("id", productShopIds);
+
+    if (error) {
+      console.error("[market] product shops query failed", error);
+    } else {
+      productShops = (data ?? []) as ShopRow[];
+    }
+  }
+
+  const shopById = new Map<string, ShopRow>(
+    [...visibleShops, ...productShops].map((shop) => [shop.id, shop]),
+  );
+
+  const products = productData.filter((product) =>
+    shopById.has(product.shop_id),
+  );
+
+  const siteUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
+  ).replace(/\/$/, "");
+
+  const resultCount =
+    visibleShops.length + products.length;
 
   return (
     <main className="min-h-screen bg-[#f8f6f0] text-ink">
@@ -105,6 +244,7 @@ export default async function MarketPage({ searchParams }: PageProps) {
             Découvrez les produits de vendeurs sénégalais et contactez-les directement
             sur WhatsApp.
           </p>
+
           <form action="/marche" method="get" className="relative mt-7 max-w-2xl">
             <Search
               size={20}
@@ -135,13 +275,16 @@ export default async function MarketPage({ searchParams }: PageProps) {
               {resultCount} résultat{resultCount === 1 ? "" : "s"} pour{" "}
               <strong className="text-ink">« {search} »</strong>
             </p>
-            <Link href="/marche" className="text-sm font-extrabold text-emerald-700">
+            <Link
+              href="/marche"
+              className="text-sm font-extrabold text-emerald-700"
+            >
               Effacer la recherche
             </Link>
           </div>
         )}
 
-        {(shops?.length ?? 0) > 0 && (
+        {visibleShops.length > 0 && (
           <section>
             <div className="flex items-end justify-between">
               <div>
@@ -151,8 +294,9 @@ export default async function MarketPage({ searchParams }: PageProps) {
                 <h2 className="mt-1 text-2xl font-bold">À découvrir</h2>
               </div>
             </div>
+
             <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {(shops ?? []).map((shop) => (
+              {visibleShops.map((shop) => (
                 <Link
                   key={shop.id}
                   href={`/${shop.slug}`}
@@ -163,7 +307,9 @@ export default async function MarketPage({ searchParams }: PageProps) {
                       <Store size={22} aria-hidden="true" />
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-lg font-bold">{shop.name}</span>
+                      <span className="block truncate text-lg font-bold">
+                        {shop.name}
+                      </span>
                       {shop.address && (
                         <span className="mt-1 flex items-center gap-1 text-xs font-medium text-ink/45">
                           <MapPin size={13} aria-hidden="true" />
@@ -191,8 +337,8 @@ export default async function MarketPage({ searchParams }: PageProps) {
           </section>
         )}
 
-        {(products?.length ?? 0) > 0 && (
-          <section className={(shops?.length ?? 0) > 0 ? "mt-12" : ""}>
+        {products.length > 0 && (
+          <section className={visibleShops.length > 0 ? "mt-12" : ""}>
             <div>
               <p className="text-sm font-extrabold uppercase tracking-[0.14em] text-emerald-700">
                 Produits
@@ -201,32 +347,34 @@ export default async function MarketPage({ searchParams }: PageProps) {
                 {search ? "Résultats produits" : "Ajoutés récemment"}
               </h2>
             </div>
+
             <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
-              {(products ?? []).map((product) => {
-                const shop = Array.isArray(product.shops)
-                  ? product.shops[0]
-                  : product.shops;
+              {products.map((product) => {
+                const shop = shopById.get(product.shop_id);
                 if (!shop) return null;
 
-                const productImages = (product.product_images ?? [])
+                const images = [...(product.product_images ?? [])]
                   .filter((image) => Boolean(image?.storage_path))
-                  .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+                  .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                  .map((image) => ({
+                    url: supabase.storage
+                      .from("product-images")
+                      .getPublicUrl(image.storage_path).data.publicUrl,
+                    position: image.position ?? 0,
+                  }));
 
-                const images = productImages.map((image) => ({
-                  url: supabase.storage
-                    .from("product-images")
-                    .getPublicUrl(image.storage_path).data.publicUrl,
-                  position: image.position ?? 0,
-                }));
-
+                const imageUrl = images[0]?.url ?? null;
                 const productUrl = `${siteUrl}/${shop.slug}#${product.slug}`;
                 const unavailable = product.status === "out_of_stock";
-                const whatsappUrl = createWhatsAppOrderUrl(shop.whatsapp_number, {
-                  name: product.name,
-                  priceXof: product.price_xof,
-                  reference: product.reference,
-                  url: productUrl,
-                });
+                const whatsappUrl = createWhatsAppOrderUrl(
+                  shop.whatsapp_number,
+                  {
+                    name: product.name,
+                    priceXof: product.price_xof,
+                    reference: product.reference,
+                    url: productUrl,
+                  },
+                );
 
                 const previewProduct = {
                   name: product.name,
@@ -237,7 +385,7 @@ export default async function MarketPage({ searchParams }: PageProps) {
                   status: unavailable ? "out_of_stock" : "active",
                   images,
                   whatsappUrl,
-                } as const;
+                };
 
                 return (
                   <article
@@ -245,44 +393,43 @@ export default async function MarketPage({ searchParams }: PageProps) {
                     className="flex flex-col overflow-hidden rounded-2xl border border-ink/8 bg-white shadow-sm sm:rounded-3xl"
                   >
                     <ProductPreviewModal product={previewProduct}>
-                      <div className="cursor-pointer">
-                        <div className="aspect-square bg-cream">
-                          {images[0] ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={images[0].url}
-                              alt={product.name}
-                              loading="lazy"
-                              className="h-full w-full object-cover transition duration-300 hover:scale-[1.02]"
-                            />
-                          ) : (
-                            <div className="grid h-full place-items-center text-ink/20">
-                              <ImageIcon size={36} aria-hidden="true" />
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="p-3 pb-0 sm:p-5 sm:pb-0">
-                          <Link
-                            href={`/${shop.slug}`}
-                            onClick={(event) => event.stopPropagation()}
-                            className="block truncate text-[11px] font-extrabold uppercase tracking-wide text-emerald-700"
-                          >
-                            {shop.name}
-                          </Link>
-                          <h3 className="mt-1 font-bold leading-5 sm:text-lg">
-                            {product.name}
-                          </h3>
-                          <p className="mt-1 text-sm font-extrabold text-ink sm:text-base">
-                            {formatXofPrice(product.price_xof)}
-                          </p>
-                        </div>
+                      <div className="aspect-square bg-cream">
+                        {imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={imageUrl}
+                            alt={product.name}
+                            loading="lazy"
+                            className="h-full w-full object-cover transition duration-300 hover:scale-[1.02]"
+                          />
+                        ) : (
+                          <div className="grid h-full place-items-center text-ink/20">
+                            <ImageIcon size={36} aria-hidden="true" />
+                          </div>
+                        )}
                       </div>
                     </ProductPreviewModal>
 
-                    <div className="flex flex-1 flex-col px-3 pb-3 pt-3 sm:px-5 sm:pb-5">
+                    <div className="flex flex-1 flex-col p-3 sm:p-5">
+                      <Link
+                        href={`/${shop.slug}`}
+                        className="truncate text-[11px] font-extrabold uppercase tracking-wide text-emerald-700"
+                      >
+                        {shop.name}
+                      </Link>
+
+                      <ProductPreviewModal product={previewProduct}>
+                        <h3 className="mt-1 cursor-pointer font-bold leading-5 hover:text-emerald-700 sm:text-lg">
+                          {product.name}
+                        </h3>
+                      </ProductPreviewModal>
+
+                      <p className="mt-1 text-sm font-extrabold text-ink sm:text-base">
+                        {formatXofPrice(product.price_xof)}
+                      </p>
+
                       {unavailable ? (
-                        <span className="mt-auto pt-1 text-center text-xs font-extrabold text-red-700">
+                        <span className="mt-auto pt-4 text-center text-xs font-extrabold text-red-700">
                           Rupture de stock
                         </span>
                       ) : (
@@ -290,7 +437,7 @@ export default async function MarketPage({ searchParams }: PageProps) {
                           href={whatsappUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="mt-auto flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-2 py-2.5 text-xs font-extrabold text-white sm:text-sm"
+                          className="mt-4 flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-2 py-2.5 text-xs font-extrabold text-white transition hover:bg-[#1fbd5b] sm:text-sm"
                         >
                           <MessageCircle size={16} aria-hidden="true" />
                           Commander
