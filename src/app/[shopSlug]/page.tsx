@@ -17,72 +17,36 @@ import { createClient } from "@/lib/supabase/server";
 import { createWhatsAppOrderUrl } from "@/lib/whatsapp";
 
 type PageProps = {
-  params: Promise<{
-    shopSlug: string;
-  }>;
+  params: Promise<{ shopSlug: string }>;
 };
 
-async function getPublishedShop(
-  slug: string,
-) {
-  const supabase =
-    await createClient();
+async function getPublishedShop(slug: string) {
+  const supabase = await createClient();
+  const { data: shop } = await supabase
+    .from("shops")
+    .select("id, name, slug, description, whatsapp_number, address")
+    .eq("slug", slug)
+    .eq("status", "published")
+    .maybeSingle();
 
-  const {
-    data: shop,
-  } =
-    await supabase
-      .from("shops")
-      .select(
-        "id, name, slug, description, whatsapp_number, address",
-      )
-      .eq(
-        "slug",
-        slug,
-      )
-      .eq(
-        "status",
-        "published",
-      )
-      .maybeSingle();
-
-  return {
-    supabase,
-    shop,
-  };
+  return { supabase, shop };
 }
 
-export async function generateMetadata({
-  params,
-}: PageProps): Promise<Metadata> {
-  const {
-    shopSlug,
-  } = await params;
-
-  const {
-    shop,
-  } =
-    await getPublishedShop(
-      shopSlug,
-    );
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { shopSlug } = await params;
+  const { shop } = await getPublishedShop(shopSlug);
 
   if (!shop) {
-    return {
-      title:
-        "Boutique introuvable",
-    };
+    return { title: "Boutique introuvable" };
   }
 
   const description =
-    shop.description ??
-    `Découvrez tous les produits de ${shop.name} et commandez sur WhatsApp.`;
+    shop.description ?? `Découvrez tous les produits de ${shop.name} et commandez sur WhatsApp.`;
 
   return {
     title: shop.name,
     description,
-    alternates: {
-      canonical: `/${shop.slug}`,
-    },
+    alternates: { canonical: `/${shop.slug}` },
     openGraph: {
       title: shop.name,
       description,
@@ -92,71 +56,31 @@ export async function generateMetadata({
   };
 }
 
-export default async function PublicShopPage({
-  params,
-}: PageProps) {
-  const {
-    shopSlug,
-  } = await params;
+export default async function PublicShopPage({ params }: PageProps) {
+  const { shopSlug } = await params;
+  const { supabase, shop } = await getPublishedShop(shopSlug);
+  if (!shop) notFound();
 
-  const {
-    supabase,
-    shop,
-  } =
-    await getPublishedShop(
-      shopSlug,
-    );
+  const { data: products } = await supabase
+    .from("products")
+    .select(
+      "id, name, slug, description, price_xof, reference, status, product_images(storage_path, position)",
+    )
+    .eq("shop_id", shop.id)
+    .in("status", ["active", "out_of_stock"])
+    .order("position")
+    .order("position", { referencedTable: "product_images" });
 
-  if (!shop) {
-    notFound();
-  }
-
-  const {
-    data: products,
-  } =
-    await supabase
-      .from("products")
-      .select(
-        "id, name, slug, description, price_xof, reference, status, product_images(storage_path, position)",
-      )
-      .eq(
-        "shop_id",
-        shop.id,
-      )
-      .in(
-        "status",
-        [
-          "active",
-          "out_of_stock",
-        ],
-      )
-      .order(
-        "position",
-      )
-      .order(
-        "position",
-        {
-          referencedTable:
-            "product_images",
-        },
-      );
-
-  const siteUrl =
-    (
-      process.env
-        .NEXT_PUBLIC_SITE_URL ??
-      "http://localhost:3000"
-    ).replace(/\/$/, "");
-
-  const shopUrl =
-    `${siteUrl}/${shop.slug}`;
-
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(
+    /\/$/,
+    "",
+  );
+  const shopUrl = `${siteUrl}/${shop.slug}`;
   return (
     <main className="min-h-screen bg-[#f8f6f0] text-ink">
       <header className="border-b border-ink/8 bg-white/90">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
           <Logo />
-
           <div className="flex items-center gap-2">
             <Link
               href="/marche"
@@ -164,14 +88,7 @@ export default async function PublicShopPage({
             >
               Explorer le marché
             </Link>
-
-            <ShareShopButton
-              shopName={
-                shop.name
-              }
-              url={shopUrl}
-              variant="light"
-            />
+            <ShareShopButton shopName={shop.name} url={shopUrl} variant="light" />
           </div>
         </div>
       </header>
@@ -179,33 +96,20 @@ export default async function PublicShopPage({
       <section className="mx-auto max-w-6xl px-4 pb-12 pt-8 sm:px-6 sm:pt-12">
         <div className="flex items-start gap-4">
           <div className="grid size-16 shrink-0 place-items-center rounded-2xl bg-emerald-700 text-white shadow-sm sm:size-20">
-            <ShoppingBag
-              size={30}
-              aria-hidden="true"
-            />
+            <ShoppingBag size={30} aria-hidden="true" />
           </div>
-
           <div>
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-              {shop.name}
-            </h1>
-
+            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{shop.name}</h1>
             {shop.address && (
               <p className="mt-2 flex items-center gap-1.5 text-sm font-medium text-ink/50">
-                <MapPin
-                  size={15}
-                  aria-hidden="true"
-                />
+                <MapPin size={15} aria-hidden="true" />
                 {shop.address}
               </p>
             )}
           </div>
         </div>
-
         {shop.description && (
-          <p className="mt-5 max-w-2xl leading-7 text-ink/60">
-            {shop.description}
-          </p>
+          <p className="mt-5 max-w-2xl leading-7 text-ink/60">{shop.description}</p>
         )}
 
         <div className="mt-9 flex items-end justify-between gap-4">
@@ -213,201 +117,104 @@ export default async function PublicShopPage({
             <p className="text-sm font-extrabold uppercase tracking-[0.14em] text-emerald-700">
               Catalogue
             </p>
-
-            <h2 className="mt-1 text-2xl font-bold">
-              Nos produits
-            </h2>
+            <h2 className="mt-1 text-2xl font-bold">Nos produits</h2>
           </div>
-
           <span className="text-sm font-semibold text-ink/40">
-            {products?.length ?? 0}{" "}
-            produit
-            {products?.length ===
-            1
-              ? ""
-              : "s"}
+            {products?.length ?? 0} produit{products?.length === 1 ? "" : "s"}
           </span>
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
-          {(products ?? []).map(
-            (product) => {
-              const productImages =
-                (
-                  product.product_images ??
-                  []
-                )
-                  .filter(
-                    (
-                      image,
-                    ) =>
-                      Boolean(
-                        image?.storage_path,
-                      ),
-                  )
-                  .sort(
-                    (
-                      a,
-                      b,
-                    ) =>
-                      (a.position ??
-                        0) -
-                      (b.position ??
-                        0),
-                  );
+          {(products ?? []).map((product) => {
+            const productImages = (product.product_images ?? [])
+              .filter((image) => Boolean(image?.storage_path))
+              .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
 
-              const images =
-                productImages.map(
-                  (
-                    image,
-                  ) => ({
-                    url: supabase.storage
-                      .from(
-                        "product-images",
-                      )
-                      .getPublicUrl(
-                        image.storage_path,
-                      ).data
-                      .publicUrl,
-                    position:
-                      image.position ??
-                      0,
-                  }),
-                );
+            const images = productImages.map((image) => ({
+              url: supabase.storage
+                .from("product-images")
+                .getPublicUrl(image.storage_path).data.publicUrl,
+              position: image.position ?? 0,
+            }));
 
-              const firstImage =
-                images[0];
+            const productUrl = `${shopUrl}#${product.slug}`;
+            const whatsappUrl = createWhatsAppOrderUrl(shop.whatsapp_number, {
+              name: product.name,
+              priceXof: product.price_xof,
+              reference: product.reference,
+              url: productUrl,
+            });
+            const unavailable = product.status === "out_of_stock";
 
-              const productUrl =
-                `${shopUrl}#${product.slug}`;
+            const previewProduct = {
+              name: product.name,
+              description: product.description,
+              priceLabel: formatXofPrice(product.price_xof),
+              reference: product.reference,
+              shopName: shop.name,
+              status: unavailable ? "out_of_stock" : "active",
+              images,
+              whatsappUrl,
+            } as const;
 
-              const whatsappUrl =
-                createWhatsAppOrderUrl(
-                  shop.whatsapp_number,
-                  {
-                    name:
-                      product.name,
-                    priceXof:
-                      product.price_xof,
-                    reference:
-                      product.reference,
-                    url: productUrl,
-                  },
-                );
-
-              const unavailable =
-                product.status ===
-                "out_of_stock";
-
-              const previewProduct =
-                {
-                  name:
-                    product.name,
-                  description:
-                    product.description,
-                  priceLabel:
-                    formatXofPrice(
-                      product.price_xof,
-                    ),
-                  reference:
-                    product.reference,
-                  shopName:
-                    shop.name,
-                  status:
-                    unavailable
-                      ? "out_of_stock"
-                      : "active",
-                  images,
-                  whatsappUrl,
-                } as const;
-
-              return (
-                <article
-                  id={product.slug}
-                  key={product.id}
-                  className="flex scroll-mt-5 flex-col overflow-hidden rounded-2xl border border-ink/8 bg-white shadow-sm sm:rounded-3xl"
-                >
-                  <ProductPreviewModal
-                    product={
-                      previewProduct
-                    }
-                  >
+            return (
+              <article
+                id={product.slug}
+                key={product.id}
+                className="flex scroll-mt-5 flex-col overflow-hidden rounded-2xl border border-ink/8 bg-white shadow-sm sm:rounded-3xl"
+              >
+                <ProductPreviewModal product={previewProduct}>
+                  <div className="cursor-pointer">
                     <div className="aspect-square bg-cream">
-                      {firstImage ? (
+                      {images[0] ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={
-                            firstImage.url
-                          }
-                          alt={
-                            product.name
-                          }
+                          src={images[0].url}
+                          alt={product.name}
                           loading="lazy"
                           className="h-full w-full object-cover transition duration-300 hover:scale-[1.02]"
                         />
                       ) : (
                         <div className="grid h-full place-items-center text-ink/20">
-                          <ImageIcon
-                            size={36}
-                            aria-hidden="true"
-                          />
+                          <ImageIcon size={36} aria-hidden="true" />
                         </div>
                       )}
                     </div>
-                  </ProductPreviewModal>
 
-                  <div className="flex flex-1 flex-col p-3 sm:p-5">
-                    <ProductPreviewModal
-                      product={
-                        previewProduct
-                      }
-                    >
-                      <h3 className="cursor-pointer font-bold leading-5 transition hover:text-emerald-700 sm:text-lg">
-                        {
-                          product.name
-                        }
-                      </h3>
-                    </ProductPreviewModal>
-
-                    <p className="mt-1 text-sm font-extrabold text-emerald-700 sm:text-base">
-                      {formatXofPrice(
-                        product.price_xof,
-                      )}
-                    </p>
-
-                    {product.description && (
-                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink/50 sm:text-sm">
-                        {
-                          product.description
-                        }
+                    <div className="p-3 pb-0 sm:p-5 sm:pb-0">
+                      <h3 className="font-bold leading-5 sm:text-lg">{product.name}</h3>
+                      <p className="mt-1 text-sm font-extrabold text-emerald-700 sm:text-base">
+                        {formatXofPrice(product.price_xof)}
                       </p>
-                    )}
-
-                    {unavailable ? (
-                      <span className="mt-auto pt-4 text-center text-xs font-extrabold text-red-700">
-                        Rupture de stock
-                      </span>
-                    ) : (
-                      <a
-                        href={
-                          whatsappUrl
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-auto flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-2 py-2.5 text-center text-xs font-extrabold text-white transition hover:bg-[#1fbd5b] sm:text-sm"
-                      >
-                        <MessageCircle
-                          size={16}
-                          aria-hidden="true"
-                        />
-                        Commander
-                      </a>
-                    )}
+                      {product.description && (
+                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink/50 sm:text-sm">
+                          {product.description}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </article>
-              );
-            },
-          )}
+                </ProductPreviewModal>
+
+                <div className="flex flex-1 flex-col px-3 pb-3 pt-3 sm:px-5 sm:pb-5">
+                  {unavailable ? (
+                    <span className="mt-auto pt-1 text-center text-xs font-extrabold text-red-700">
+                      Rupture de stock
+                    </span>
+                  ) : (
+                    <a
+                      href={whatsappUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-auto flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-2 py-2.5 text-center text-xs font-extrabold text-white transition hover:bg-[#1fbd5b] sm:text-sm"
+                    >
+                      <MessageCircle size={16} aria-hidden="true" />
+                      Commander
+                    </a>
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </div>
       </section>
 
@@ -416,18 +223,11 @@ export default async function PublicShopPage({
           href="/marche"
           className="inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700"
         >
-          Explorer d’autres
-          boutiques
-
-          <ArrowRight
-            size={16}
-            aria-hidden="true"
-          />
+          Explorer d’autres boutiques
+          <ArrowRight size={16} aria-hidden="true" />
         </Link>
-
         <p className="mt-2 text-xs font-medium text-ink/35">
-          Catalogue créé avec
-          MiniShop
+          Catalogue créé avec MiniShop
         </p>
       </footer>
     </main>
