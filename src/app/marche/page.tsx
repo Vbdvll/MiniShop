@@ -384,7 +384,7 @@ export default async function MarketPage({ searchParams }: PageProps) {
                   priceLabel: formatXofPrice(product.price_xof),
                   reference: product.reference,
                   shopName: shop.name,
-                  status: unavailable ? "out_of_stock" : "active",
+                  status: (unavailable ? "out_of_stock" : "active") as "active" | "out_of_stock",
                   images,
                   whatsappUrl,
                 };
