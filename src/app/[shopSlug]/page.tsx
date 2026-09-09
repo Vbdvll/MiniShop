@@ -41,7 +41,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }
 
   const description =
-    shop.description ?? `Découvrez tous les produits de ${shop.name} et commandez sur WhatsApp.`;
+    shop.description ??
+    `Découvrez tous les produits de ${shop.name} et commandez sur WhatsApp.`;
 
   return {
     title: shop.name,
@@ -59,9 +60,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function PublicShopPage({ params }: PageProps) {
   const { shopSlug } = await params;
   const { supabase, shop } = await getPublishedShop(shopSlug);
+
   if (!shop) notFound();
 
-  const { data: products } = await supabase
+  const { data: products, error: productsError } = await supabase
     .from("products")
     .select(
       "id, name, slug, description, price_xof, reference, status, product_images(storage_path, position)",
@@ -71,11 +73,15 @@ export default async function PublicShopPage({ params }: PageProps) {
     .order("position")
     .order("position", { referencedTable: "product_images" });
 
-  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(
-    /\/$/,
-    "",
-  );
+  if (productsError) {
+    console.error("[shop] products query failed", productsError);
+  }
+
+  const siteUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
+  ).replace(/\/$/, "");
   const shopUrl = `${siteUrl}/${shop.slug}`;
+
   return (
     <main className="min-h-screen bg-[#f8f6f0] text-ink">
       <header className="border-b border-ink/8 bg-white/90">
@@ -108,6 +114,7 @@ export default async function PublicShopPage({ params }: PageProps) {
             )}
           </div>
         </div>
+
         {shop.description && (
           <p className="mt-5 max-w-2xl leading-7 text-ink/60">{shop.description}</p>
         )}
@@ -126,17 +133,17 @@ export default async function PublicShopPage({ params }: PageProps) {
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
           {(products ?? []).map((product) => {
-            const productImages = (product.product_images ?? [])
+            const images = [...(product.product_images ?? [])]
               .filter((image) => Boolean(image?.storage_path))
-              .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+              .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+              .map((image) => ({
+                url: supabase.storage
+                  .from("product-images")
+                  .getPublicUrl(image.storage_path).data.publicUrl,
+                position: image.position ?? 0,
+              }));
 
-            const images = productImages.map((image) => ({
-              url: supabase.storage
-                .from("product-images")
-                .getPublicUrl(image.storage_path).data.publicUrl,
-              position: image.position ?? 0,
-            }));
-
+            const firstImage = images[0] ?? null;
             const productUrl = `${shopUrl}#${product.slug}`;
             const whatsappUrl = createWhatsAppOrderUrl(shop.whatsapp_number, {
               name: product.name,
@@ -164,40 +171,42 @@ export default async function PublicShopPage({ params }: PageProps) {
                 className="flex scroll-mt-5 flex-col overflow-hidden rounded-2xl border border-ink/8 bg-white shadow-sm sm:rounded-3xl"
               >
                 <ProductPreviewModal product={previewProduct}>
-                  <div className="cursor-pointer">
-                    <div className="aspect-square bg-cream">
-                      {images[0] ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={images[0].url}
-                          alt={product.name}
-                          loading="lazy"
-                          className="h-full w-full object-cover transition duration-300 hover:scale-[1.02]"
-                        />
-                      ) : (
-                        <div className="grid h-full place-items-center text-ink/20">
-                          <ImageIcon size={36} aria-hidden="true" />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="p-3 pb-0 sm:p-5 sm:pb-0">
-                      <h3 className="font-bold leading-5 sm:text-lg">{product.name}</h3>
-                      <p className="mt-1 text-sm font-extrabold text-emerald-700 sm:text-base">
-                        {formatXofPrice(product.price_xof)}
-                      </p>
-                      {product.description && (
-                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink/50 sm:text-sm">
-                          {product.description}
-                        </p>
-                      )}
-                    </div>
+                  <div className="aspect-square bg-cream">
+                    {firstImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={firstImage.url}
+                        alt={product.name}
+                        loading="lazy"
+                        className="h-full w-full object-cover transition duration-300 hover:scale-[1.02]"
+                      />
+                    ) : (
+                      <div className="grid h-full place-items-center text-ink/20">
+                        <ImageIcon size={36} aria-hidden="true" />
+                      </div>
+                    )}
                   </div>
                 </ProductPreviewModal>
 
-                <div className="flex flex-1 flex-col px-3 pb-3 pt-3 sm:px-5 sm:pb-5">
+                <div className="flex flex-1 flex-col p-3 sm:p-5">
+                  <ProductPreviewModal product={previewProduct}>
+                    <h3 className="cursor-pointer font-bold leading-5 hover:text-emerald-700 sm:text-lg">
+                      {product.name}
+                    </h3>
+                  </ProductPreviewModal>
+
+                  <p className="mt-1 text-sm font-extrabold text-emerald-700 sm:text-base">
+                    {formatXofPrice(product.price_xof)}
+                  </p>
+
+                  {product.description && (
+                    <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink/50 sm:text-sm">
+                      {product.description}
+                    </p>
+                  )}
+
                   {unavailable ? (
-                    <span className="mt-auto pt-1 text-center text-xs font-extrabold text-red-700">
+                    <span className="mt-auto pt-4 text-center text-xs font-extrabold text-red-700">
                       Rupture de stock
                     </span>
                   ) : (
@@ -226,9 +235,7 @@ export default async function PublicShopPage({ params }: PageProps) {
           Explorer d’autres boutiques
           <ArrowRight size={16} aria-hidden="true" />
         </Link>
-        <p className="mt-2 text-xs font-medium text-ink/35">
-          Catalogue créé avec MiniShop
-        </p>
+        <p className="mt-2 text-xs font-medium text-ink/35">Catalogue créé avec MiniShop</p>
       </footer>
     </main>
   );
