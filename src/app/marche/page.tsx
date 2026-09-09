@@ -10,6 +10,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Logo } from "@/components/logo";
+import { ProductPreviewModal } from "@/components/product-preview-modal";
 import { formatXofPrice } from "@/lib/product";
 import { createClient } from "@/lib/supabase/server";
 import { createWhatsAppOrderUrl } from "@/lib/whatsapp";
@@ -207,12 +208,17 @@ export default async function MarketPage({ searchParams }: PageProps) {
                   : product.shops;
                 if (!shop) return null;
 
-                const firstImage = product.product_images?.[0];
-                const imageUrl = firstImage
-                  ? supabase.storage
-                      .from("product-images")
-                      .getPublicUrl(firstImage.storage_path).data.publicUrl
-                  : null;
+                const productImages = (product.product_images ?? [])
+                  .filter((image) => Boolean(image?.storage_path))
+                  .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+
+                const images = productImages.map((image) => ({
+                  url: supabase.storage
+                    .from("product-images")
+                    .getPublicUrl(image.storage_path).data.publicUrl,
+                  position: image.position ?? 0,
+                }));
+
                 const productUrl = `${siteUrl}/${shop.slug}#${product.slug}`;
                 const unavailable = product.status === "out_of_stock";
                 const whatsappUrl = createWhatsAppOrderUrl(shop.whatsapp_number, {
@@ -222,41 +228,61 @@ export default async function MarketPage({ searchParams }: PageProps) {
                   url: productUrl,
                 });
 
+                const previewProduct = {
+                  name: product.name,
+                  description: product.description,
+                  priceLabel: formatXofPrice(product.price_xof),
+                  reference: product.reference,
+                  shopName: shop.name,
+                  status: unavailable ? "out_of_stock" : "active",
+                  images,
+                  whatsappUrl,
+                } as const;
+
                 return (
                   <article
                     key={product.id}
                     className="flex flex-col overflow-hidden rounded-2xl border border-ink/8 bg-white shadow-sm sm:rounded-3xl"
                   >
-                    <Link href={`/${shop.slug}#${product.slug}`} className="block">
-                      <div className="aspect-square bg-cream">
-                        {imageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={imageUrl}
-                            alt={product.name}
-                            loading="lazy"
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <div className="grid h-full place-items-center text-ink/20">
-                            <ImageIcon size={36} aria-hidden="true" />
-                          </div>
-                        )}
+                    <ProductPreviewModal product={previewProduct}>
+                      <div className="cursor-pointer">
+                        <div className="aspect-square bg-cream">
+                          {images[0] ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={images[0].url}
+                              alt={product.name}
+                              loading="lazy"
+                              className="h-full w-full object-cover transition duration-300 hover:scale-[1.02]"
+                            />
+                          ) : (
+                            <div className="grid h-full place-items-center text-ink/20">
+                              <ImageIcon size={36} aria-hidden="true" />
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-3 pb-0 sm:p-5 sm:pb-0">
+                          <Link
+                            href={`/${shop.slug}`}
+                            onClick={(event) => event.stopPropagation()}
+                            className="block truncate text-[11px] font-extrabold uppercase tracking-wide text-emerald-700"
+                          >
+                            {shop.name}
+                          </Link>
+                          <h3 className="mt-1 font-bold leading-5 sm:text-lg">
+                            {product.name}
+                          </h3>
+                          <p className="mt-1 text-sm font-extrabold text-ink sm:text-base">
+                            {formatXofPrice(product.price_xof)}
+                          </p>
+                        </div>
                       </div>
-                    </Link>
-                    <div className="flex flex-1 flex-col p-3 sm:p-5">
-                      <Link
-                        href={`/${shop.slug}`}
-                        className="truncate text-[11px] font-extrabold uppercase tracking-wide text-emerald-700"
-                      >
-                        {shop.name}
-                      </Link>
-                      <h3 className="mt-1 font-bold leading-5 sm:text-lg">{product.name}</h3>
-                      <p className="mt-1 text-sm font-extrabold text-ink sm:text-base">
-                        {formatXofPrice(product.price_xof)}
-                      </p>
+                    </ProductPreviewModal>
+
+                    <div className="flex flex-1 flex-col px-3 pb-3 pt-3 sm:px-5 sm:pb-5">
                       {unavailable ? (
-                        <span className="mt-auto pt-4 text-center text-xs font-extrabold text-red-700">
+                        <span className="mt-auto pt-1 text-center text-xs font-extrabold text-red-700">
                           Rupture de stock
                         </span>
                       ) : (
@@ -264,7 +290,7 @@ export default async function MarketPage({ searchParams }: PageProps) {
                           href={whatsappUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="mt-4 flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-2 py-2.5 text-xs font-extrabold text-white sm:text-sm"
+                          className="mt-auto flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-2 py-2.5 text-xs font-extrabold text-white sm:text-sm"
                         >
                           <MessageCircle size={16} aria-hidden="true" />
                           Commander
